@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CareConnect Global</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <style>
+    @keyframes float {
+      0% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+      100% { transform: translateY(0px); }
+    }
+    .float-animation {
+      animation: float 3s ease-in-out infinite;
+    }
+    .gradient-bg {
+      background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+    }
+    .glass-effect {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+<body class="min-h-screen gradient-bg">
+  <div class="container mx-auto px-4 py-12">
+    <div class="text-center mb-12">
+      <h1 class="text-5xl font-bold text-white mb-4">CareConnect Global</h1>
+      <p class="text-blue-100 text-lg">Find healthcare services near you instantly</p>
+    </div>
+    
+    <div class="max-w-4xl mx-auto glass-effect rounded-2xl p-8 mb-12 transform hover:scale-[1.02] transition-transform duration-300">
+      <h2 class="text-3xl font-semibold text-gray-800 mb-8 text-center">Find Healthcare Services Near You</h2>
+      <div class="flex justify-center">
+        <button onclick="findNearbyHospitals()" 
+          class="px-10 py-5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-300 shadow-lg text-xl font-semibold flex items-center space-x-3 float-animation">
+          <i class="fas fa-location-arrow text-2xl"></i>
+          <span>Find Nearby Hospitals</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="map" class="h-[500px] w-full rounded-2xl shadow-2xl mb-12 glass-effect overflow-hidden"></div>
+    
+    <div class="max-w-4xl mx-auto glass-effect rounded-2xl p-8" id="clinicList">
+      <h2 class="text-3xl font-semibold text-gray-800 mb-8">Available Healthcare Facilities</h2>
+      <div class="space-y-6" id="clinicItems"></div>
+    </div>
+  </div>
+
+  <!-- Chat Interface -->
+  <div class="fixed bottom-6 right-6 z-50">
+    <!-- Chat Button -->
+    <button id="chatButton" class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-5 rounded-full shadow-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-300 transform hover:scale-110">
+      <i class="fas fa-comments text-2xl"></i>
+    </button>
+
+    <!-- Chat Window -->
+    <div id="chatWindow" class="hidden fixed bottom-24 right-6 w-96 glass-effect rounded-2xl shadow-2xl flex flex-col h-[600px] transform transition-all duration-300">
+      <!-- Chat Header -->
+      <div class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 rounded-t-2xl flex justify-between items-center">
+        <h3 class="font-semibold text-lg">CareConnect Assistant</h3>
+        <button id="closeChat" class="text-white hover:text-gray-200 transition-colors duration-200">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <!-- Chat Messages -->
+      <div id="chatMessages" class="flex-1 overflow-y-auto p-6 space-y-4">
+        <div class="flex items-start space-x-3">
+          <div class="bg-blue-100 rounded-2xl p-4 max-w-[80%] shadow-sm">
+            <p class="text-sm text-gray-800">Hello! I'm your CareConnect assistant. How can I help you today?</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Input -->
+      <div class="border-t border-gray-200 p-4">
+        <div class="flex space-x-3">
+          <input type="text" id="chatInput" placeholder="Type your message..." 
+            class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm" />
+          <button id="sendMessage" class="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-3 rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all duration-300 shadow-md">
+            <i class="fas fa-paper-plane"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    let map, userMarker;
+    let hospitalMarkers = [];
+
+    function findNearbyHospitals() {
+      if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser.");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(position => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+
+        if (!map) {
+          map = L.map('map').setView([lat, lon], 13);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: 'Map data © <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'
+          }).addTo(map);
+        }
+
+        if (userMarker) {
+          userMarker.setLatLng([lat, lon]);
+        } else {
+          userMarker = L.marker([lat, lon]).addTo(map).bindPopup('You are here').openPopup();
+        }
+
+        hospitalMarkers.forEach(marker => map.removeLayer(marker));
+        hospitalMarkers = [];
+
+        const query = `[out:json];node["amenity"="hospital"](around:5000,${lat},${lon});out;`;
+        fetch("https://overpass-api.de/api/interpreter", {
+          method: "POST",
+          body: query,
+        })
+        .then(response => response.json())
+        .then(data => {
+          const hospitals = data.elements.map(el => {
+            const marker = L.marker([el.lat, el.lon]).addTo(map)
+              .bindPopup(`<strong>${el.tags.name || "Unnamed Hospital"}</strong><br>${el.tags.phone || ''}`);
+            hospitalMarkers.push(marker);
+
+            return {
+              name: el.tags.name || "Unnamed Hospital",
+              location: `${el.lat.toFixed(4)}, ${el.lon.toFixed(4)}`,
+              services: "General",
+              contact: el.tags.phone || el.tags.contact || "",
+              languages: "N/A"
+            };
+          });
+          renderClinicList(hospitals);
+        })
+        .catch(err => {
+          console.error("Error fetching hospitals:", err);
+          alert("Failed to fetch nearby hospitals.");
+        });
+      }, () => {
+        alert("Unable to retrieve your location.");
+      });
+    }
+
+    function renderClinicList(hospitals = []) {
+      const list = document.getElementById('clinicItems');
+      list.innerHTML = '';
+
+      if (hospitals.length === 0) {
+        list.innerHTML = `
+          <div class="text-center py-8">
+            <i class="fas fa-search text-4xl text-gray-400 mb-4"></i>
+            <p class="text-gray-500 text-lg">No healthcare facilities found nearby. Try searching in a different area.</p>
+          </div>`;
+        return;
+      }
+
+      hospitals.forEach(hospital => {
+        const div = document.createElement('div');
+        div.className = 'p-6 border border-gray-200 rounded-xl hover:shadow-lg transition-all duration-300 transform hover:scale-[1.02] bg-white/50';
+        div.innerHTML = `
+          <div class="flex items-start space-x-4">
+            <div class="bg-blue-100 p-3 rounded-lg">
+              <i class="fas fa-hospital text-blue-600 text-xl"></i>
+            </div>
+            <div class="flex-1">
+              <h3 class="text-xl font-semibold text-gray-800 mb-3">${hospital.name}</h3>
+              <div class="space-y-2 text-gray-600">
+                <p class="flex items-center space-x-2">
+                  <i class="fas fa-map-marker-alt text-blue-500"></i>
+                  <span>${hospital.location}</span>
+                </p>
+                <p class="flex items-center space-x-2">
+                  <i class="fas fa-stethoscope text-blue-500"></i>
+                  <span>${hospital.services}</span>
+                </p>
+                ${hospital.contact ? `
+                <p class="flex items-center space-x-2">
+                  <i class="fas fa-phone text-blue-500"></i>
+                  <span>${hospital.contact}</span>
+                </p>` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+        list.appendChild(div);
+      });
+    }
+
+    // Chat Interface
+    const chatButton = document.getElementById('chatButton');
+    const chatWindow = document.getElementById('chatWindow');
+    const closeChat = document.getElementById('closeChat');
+    const chatInput = document.getElementById('chatInput');
+    const sendMessage = document.getElementById('sendMessage');
+    const chatMessages = document.getElementById('chatMessages');
+
+    // DeepSeek API Configuration
+    const DEEPSEEK_API_KEY = 'YOUR_DEEPSEEK_API_KEY'; // Replace with your actual API key
+    const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
+
+    chatButton.addEventListener('click', () => {
+      chatWindow.classList.toggle('hidden');
+    });
+
+    closeChat.addEventListener('click', () => {
+      chatWindow.classList.add('hidden');
+    });
+
+    async function sendToDeepSeek(message) {
+      try {
+        const response = await fetch(DEEPSEEK_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a helpful healthcare assistant for CareConnect Global, helping users find healthcare services.'
+              },
+              {
+                role: 'user',
+                content: message
+              }
+            ],
+            model: 'deepseek-chat',
+            temperature: 0.7
+          })
+        });
+
+        const data = await response.json();
+        return data.choices[0].message.content;
+      } catch (error) {
+        console.error('Error:', error);
+        return 'I apologize, but I am having trouble connecting to the service right now. Please try again later.';
+      }
+    }
+
+    function addMessage(message, isUser = false) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `flex items-start space-x-3 ${isUser ? 'justify-end' : ''}`;
+      
+      const messageContent = document.createElement('div');
+      messageContent.className = `${isUser ? 'bg-blue-600 text-white' : 'bg-blue-100 text-gray-800'} rounded-2xl p-4 max-w-[80%] shadow-sm`;
+      messageContent.innerHTML = `<p class="text-sm">${message}</p>`;
+      
+      messageDiv.appendChild(messageContent);
+      chatMessages.appendChild(messageDiv);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    async function handleSendMessage() {
+      const message = chatInput.value.trim();
+      if (!message) return;
+
+      // Add user message
+      addMessage(message, true);
+      chatInput.value = '';
+
+      // Show typing indicator
+      const typingDiv = document.createElement('div');
+      typingDiv.className = 'flex items-start space-x-3';
+      typingDiv.innerHTML = `
+        <div class="bg-blue-100 rounded-2xl p-4">
+          <p class="text-sm text-gray-800">Typing...</p>
+        </div>
+      `;
+      chatMessages.appendChild(typingDiv);
+
+      // Get response from DeepSeek
+      const response = await sendToDeepSeek(message);
+      
+      // Remove typing indicator
+      chatMessages.removeChild(typingDiv);
+      
+      // Add assistant response
+      addMessage(response);
+    }
+
+    sendMessage.addEventListener('click', handleSendMessage);
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        handleSendMessage();
+      }
+    });
+  </script>
+</body>
+</html>
